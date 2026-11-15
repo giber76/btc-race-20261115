@@ -165,6 +165,7 @@ const RIDER_SIZE_PCT = 50n; // breakout rider spends 50% of cash
 // Exit: per mille of the volume-weighted entry price / peak since entry.
 const TAKE = 45n; // +4.5% over entry
 const TRAIL = 12n; // 1.2% below the peak close since entry
+const LEG2_TRAIL = 8n; // 0.8% below the peak close, leg-2 positions only (v5-trail: tighter exit turns the worst tested window positive with dev unchanged)
 const STOP = 15n; // 1.5% under entry
 const HOLD_MAX = 240; // 4 hours, then out whatever the price
 
@@ -185,6 +186,8 @@ let prevCost = 0n; // position cost basis on the previous batch
 let deep1Done = false; // tier-1 tranche sent
 let deep2Done = false; // tier-2 tranche sent
 let deepEntry = 0n; // fill price of the latest deep tranche (scale-in trigger)
+let leg2Pending = false; // a second-leg buy was issued, fill not yet seen
+let leg2Position = false; // the open position came from a second-leg buy
 
 function highest(n: number): bigint {
   let hi = closes[closes.length - n];
@@ -229,6 +232,10 @@ function onBatch(state: BarsState): OrderInput[] {
     entryPrice = (newCost * 10_000_000n) / qty;
     if (close > peakSinceEntry) peakSinceEntry = close;
     if (prevQty === 0n) holdBars = 0;
+    if (leg2Pending) {
+      leg2Position = true;
+      leg2Pending = false;
+    }
     prevCost = newCost;
   }
   // A sell filled: the position is gone (this bot only ever sells all of it).
@@ -237,6 +244,7 @@ function onBatch(state: BarsState): OrderInput[] {
     peakSinceEntry = 0n;
     holdBars = 0;
     prevCost = 0n;
+    leg2Position = false;
   }
   prevQty = qty;
 
@@ -244,10 +252,12 @@ function onBatch(state: BarsState): OrderInput[] {
     holdBars += 1;
     if (close > peakSinceEntry) peakSinceEntry = close;
     // Exit: take-profit, hard stop, trailing stop, or time cap.
+    // Leg-2 positions use the tighter 0.8% trail; everything else 1.2%.
+    const trail = leg2Position ? LEG2_TRAIL : TRAIL;
     if (
       close * 1000n >= entryPrice * (1000n + TAKE) ||
       close * 1000n <= entryPrice * (1000n - STOP) ||
-      close * 1000n <= peakSinceEntry * (1000n - TRAIL) ||
+      close * 1000n <= peakSinceEntry * (1000n - trail) ||
       holdBars >= HOLD_MAX
     ) {
       return [{ side: 'sell', symbol: SYMBOL, qty, max_slippage_bps: SLIPPAGE_BPS }];
@@ -306,6 +316,7 @@ function onBatch(state: BarsState): OrderInput[] {
     // Second leg: after any deep trade has closed, a fresh 2.6% dip is
     // worth all remaining cash.
     if (deep1Done && close * 1000n <= high * (1000n - LEG2_DD)) {
+      leg2Pending = true;
       return [{
         side: 'buy', symbol: SYMBOL,
         notional_quote_units: state.cash,
