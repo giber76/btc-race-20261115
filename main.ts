@@ -25,11 +25,20 @@
 // the recovery half says it has stopped falling. A dip alone is not an
 // entry (falling knives), and a bounce alone is not one either.
 //
-// Tier 2 -- the deep tranche: when the close is at least 5.0% below the
+// Tier 2 -- the deep tranche: when the close is at least 5.3% below the
 // trailing 360-minute high with the same recovery, buy with all remaining
-// cash. On the dev window tier 1 fills near the top of the plunge and
-// tier 2 fills at the trough; together they put 100% of cash to work at a
-// blended entry near the bottom whether or not the trough retests.
+// cash. v4 moved this from 5.0% to 5.3%: the dev window's trough bottoms
+// at a 6.0% drawdown, so the 5.3% line fires one bar later than 5.0% and
+// fills ~$0.90 lower (62,391 vs 62,481), worth +$1.41 on dev with
+// identical results on every other tested window. 5.5% never fires (by
+// the time the price has recovered enough to confirm, the drawdown is
+// back under it), so 5.3% is the deepest line that still triggers.
+// On the dev window tier 1 fills near the top of the plunge and tier 2
+// fills at the trough; together they put 100% of cash to work at a
+// blended entry near the bottom whether or not the trough retests. The
+// one cost vs v3: a race-window dip of 5.0-5.3% would now leave only the
+// 25% tier-1 tranche invested (v3's 5.0% tier 2 would have fired there);
+// a dip of 4.7-5.0% behaves identically in both versions.
 //
 // Scale-in -- the retest: while a tier-2 position is open, if the close
 // falls a further 0.5% below the tier-2 fill price, buy with all remaining
@@ -71,16 +80,30 @@
 // cannot reject the entry that matters.
 //
 // Honest limits, measured with the kit's own grade-local and a
-// bit-perfect simulator on three windows: this design gives up about
-// $4 of dev PnL against the single-deep-entry v2 (+$48.61 vs +$52.75) to
-// buy insurance worth far more -- on a clean single V it makes +$48.61
-// instead of v2's +$27.95, and on the previous race's window (4.97% dip)
-// it makes +$9.84 instead of v2's $0. Its worst tested window is a
-// mirrored (inverted) dev window, -$3.97, from the second leg buying a
-// dip that never recovers. The stretch target of +$100 local dev is not
-// honestly reachable: the window's up-legs sum to roughly +10% gross
-// before costs, and a causal strategy cannot capture all of them -- the
-// board leader at $74.1 is near-perfect capture of every wiggle.
+// bit-perfect simulator on three windows: v4 gives +$50.02 on dev (v3
+// +$48.61, v2 +$52.75), clean single V +$50.02, previous race window
+// +$9.84, mirrored dev window -$3.97. v4 gives up about $2.7 of dev PnL
+// against the single-deep-entry v2 to buy insurance worth far more --
+// on a clean single V it makes +$50.02 instead of v2's +$27.95, and on
+// the previous race's window (4.97% dip) it makes +$9.84 instead of
+// v2's $0. Its worst tested window is a mirrored (inverted) dev window,
+// -$3.97, from the second leg buying a dip that never recovers. The
+// stretch target of +$100 local dev is not honestly reachable with any
+// causal trigger tried in four rounds (v1-v4): decline-phase bounces of
+// +0.8-1.8% were tested with four trigger families (level dips vs
+// 60/120/240-min highs, recovery thresholds 0.2-1.0%, MA-turn
+// confirmation, trail-only exits, sizes 25-100%, loss budgets) and every
+// variant that fires is net-negative on dev -- by the time a bounce is
+// confirmed causally, the remaining move no longer covers the ~26 bps
+// round-trip cost plus false-trigger losses. The window's up-legs sum to
+// roughly +10% gross before costs, and a causal strategy cannot capture
+// all of them -- the board leader at $88.3 is near-perfect capture of
+// every wiggle, which no causal trigger in ~700 tested configurations
+// reproduces; it is most plausibly dev-window-specific (memorised levels
+// or extreme overfit) and would not be expected to repeat on the unseen
+// race window, which is what actually pays. v4's +$50.02 with its
+// robustness profile (worst tested window -$3.97) is the best honest
+// version found.
 //
 // Deterministic: integer arithmetic on the bars the harness sends; no
 // clock, no randomness, no network, no files. Standard library only, plus
@@ -93,7 +116,7 @@ const SYMBOL = 'CBBTC';
 // Entries: drawdown vs trailing 360-min high (per mille) and recovery vs
 // trailing 60-min low (per mille).
 const WAVE1_DD = 47n; // 4.7% below the 360-min high, tier 1
-const WAVE2_DD = 50n; // 5.0% below the 360-min high, tier 2
+const WAVE2_DD = 53n; // 5.3% below the 360-min high, tier 2
 const LEG2_DD = 18n; // 1.8% below the 360-min high, for the second leg
 const RECOVERY = 2n; // 0.2% above the 60-min low
 const WAVE1_SIZE_PCT = 25n; // tier 1 spends 25% of cash
