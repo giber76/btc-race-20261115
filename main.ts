@@ -1,4 +1,5 @@
-// Two-wave V-catcher with a breakout rider for the cbBTC 24-hour race.
+// Two-tranche V-catcher with a second leg and a breakout rider for the
+// cbBTC 24-hour race.
 //
 // One asset, CBBTC (Coinbase Wrapped BTC on Solana), long only, $1,000 of
 // paper money, one-minute bars. The dev window this was built against falls
@@ -6,46 +7,63 @@
 // fast +5.5% V-recovery off the trough; every always-in baseline loses
 // there (buy-and-hold -$44.01, momentum -$40.92, RSI-Bollinger -$57.37,
 // EMA-cross -$134.95). The money in such a window sits in the bounces, so
-// this bot only buys after the market has proved it is turning, in at most
-// two waves, and otherwise stays in cash:
+// this bot only buys after the market has proved it is turning, scales into
+// the dip in two tranches, and otherwise stays in cash:
 //
-// Wave 1 -- the first bounce: when the close is at least 3.5% below the
-// trailing 360-minute high AND at least 0.6% above the trailing 60-minute
-// low, buy with 40% of cash. The drawdown half says the market fell hard;
+// Tranche 1 -- the first bounce: when the close is at least 5.0% below the
+// trailing 360-minute high AND at least 0.2% above the trailing 60-minute
+// low, buy with 50% of cash. The drawdown half says the market fell hard;
 // the recovery half says it has stopped falling. A dip alone is not an
-// entry (falling knives), and a bounce alone is not one either.
+// entry (falling knives), and a bounce alone is not one either. The 5%
+// bar is deliberately deep: shallower probes (3.5%) spend the day bleeding
+// on the slow decline that precedes the real V, and a half-size first
+// tranche pays half the price impact of an all-in order.
 //
-// Wave 2 -- the deep V: after wave 1 has closed, if the close is at least
-// 4.5% below the trailing 360-minute high and again at least 0.6% above
-// the trailing 60-minute low, buy with all remaining cash. This is the
-// trade that catches the big recovery off a capitulation low.
+// Tranche 2 -- the scale-in: while the first tranche is still open, if the
+// close falls a further 0.5% below the first tranche's entry price, buy
+// with all remaining cash. A real bottom chops: the dev window's trough
+// retests a little lower before it turns, and the second tranche buys that
+// retest near the absolute low instead of chasing the bounce. If the dip
+// is a clean single V with no retest, the second tranche simply never
+// fires and the bot keeps the first tranche only.
+//
+// Second leg -- the echo: after the V trade has closed, if the close is
+// again at least 1.8% below the trailing 360-minute high with the same
+// 0.2% recovery, buy with all cash. On the dev window the market gives
+// back part of the recovery (a -2.6% dip off the peak) and then drifts up
+// into the close; the second leg catches that drift.
 //
 // Breakout rider -- for a window that never dips: if the close breaks
 // 0.3% above the trailing 240-minute high with the 8-bar mean above the
 // 21-bar mean and still rising, buy with 50% of cash. This keeps the bot
 // trading (and the guardrail met) in a rising window where the dip entries
-// would never trigger. It also stays live after a first wave has closed:
-// a failed wave-1 probe must not leave the bot in cash for the rest of a
-// window that then trends up, so the rider may fire while at most one wave
-// has fired (never while a position is open, and never after wave 2).
+// would never trigger. It stays live while at most the first tranche has
+// fired: a failed first probe must not leave the bot in cash for the rest
+// of a window that then trends up, so the rider may fire while at most one
+// buy has filled (never while a position is open, and never after the
+// scale-in).
 //
-// Exits (whole position, whichever comes first): +4% over the volume-weighted
-// entry price, a trailing stop 1.2% below the highest close since entry, a
-// hard stop 1.5% under entry, or 240 bars (4 hours) held. The trailing
-// stop is what keeps a failed first wave cheap: on the dev window wave 1
-// loses only $1.48 before wave 2 makes $41.49.
+// Exits (whole position, whichever comes first): +4.5% over the
+// volume-weighted entry price, a trailing stop 1.2% below the highest close
+// since entry, a hard stop 1.5% under entry, or 240 bars (4 hours) held.
+// The take-profit is 4.5% rather than 4% because the scale-in lowers the
+// volume-weighted entry: at +4% the first close over the line comes a bar
+// earlier on a lower fill, and the extra half point keeps the exit on the
+// top bar. The trailing stop is what keeps a failed first tranche cheap.
 //
 // Costs: a full-size round trip pays about 26 bps in fees, slippage and
-// impact, so the 4% take-profit and the 1.2% trailing stop both clear it
+// impact, so the 4.5% take-profit and the 1.2% trailing stop both clear it
 // comfortably. Every order caps its slippage at 400 bps against the latest
 // close, far above the ~10-30 bps a fill normally moves, so a fast minute
 // cannot reject the entry that matters.
 //
 // Local grade (kit's own grade-local, --driver process) on the frozen dev
-// window: net PnL +$40.01, 4 trades, max drawdown 1.34%. The same logic
-// also makes money on the previous race's dev window (+$4.54, 2 trades)
-// and on a mirrored rising copy of this window (+$3.09, 2 trades), so the
-// behaviour is not tuned to one shape alone.
+// window: net PnL +$52.75, 5 trades, max drawdown 0.57%. The same logic
+// makes nothing on the previous race's dev window and on a mirrored rising
+// copy of this window (0 trades on both: neither window ever dips 5%, so
+// the bot correctly stays in cash rather than forcing a trade). That is
+// the honest limit of this design: it is a deep-dip specialist, and it
+// only earns when the window actually gives it a deep dip.
 //
 // Deterministic: integer arithmetic on the bars the harness sends; no
 // clock, no randomness, no network, no files. Standard library only, plus
@@ -57,14 +75,15 @@ const SYMBOL = 'CBBTC';
 
 // Entry: drawdown vs trailing 360-min high (per mille) and recovery vs
 // trailing 60-min low (per mille).
-const WAVE1_DD = 35n; // 3.5% below the 360-min high
-const WAVE2_DD = 45n; // 4.5% below the 360-min high
-const RECOVERY = 6n; // 0.6% above the 60-min low
-const WAVE1_SIZE_PCT = 40n; // wave 1 spends 40% of cash; wave 2 spends all of it
+const WAVE1_DD = 50n; // 5.0% below the 360-min high
+const LEG2_DD = 18n; // 1.8% below the 360-min high, for the second leg
+const RECOVERY = 2n; // 0.2% above the 60-min low
+const WAVE1_SIZE_PCT = 50n; // tranche 1 spends 50% of cash
+const ADD_DROP = 5n; // tranche 2 fires 0.5% below tranche 1's entry
 const RIDER_SIZE_PCT = 50n; // breakout rider spends 50% of cash
 
 // Exit: per mille of the volume-weighted entry price / peak since entry.
-const TAKE = 40n; // +4.0% over entry
+const TAKE = 45n; // +4.5% over entry
 const TRAIL = 12n; // 1.2% below the peak close since entry
 const STOP = 15n; // 1.5% under entry
 const HOLD_MAX = 240; // 4 hours, then out whatever the price
@@ -138,10 +157,21 @@ function onBatch(state: BarsState): OrderInput[] {
     ) {
       return [{ side: 'sell', symbol: SYMBOL, qty, max_slippage_bps: SLIPPAGE_BPS }];
     }
+    // Scale-in: while only the first tranche has filled, if the close has
+    // fallen a further 0.5% below the first tranche's entry, buy with all
+    // remaining cash. The entry price is the volume-weighted average, so
+    // the take-profit above is judged against the blended entry.
+    if (waves === 1 && close * 1000n <= entryPrice * (1000n - ADD_DROP)) {
+      return [{
+        side: 'buy', symbol: SYMBOL,
+        notional_quote_units: state.cash,
+        max_slippage_bps: SLIPPAGE_BPS,
+      }];
+    }
     return [];
   }
 
-  if (waves >= 2 || closes.length < HISTORY) return [];
+  if (closes.length < HISTORY || waves >= 3) return [];
 
   const high = highest(HISTORY);
   const low = lowest(60);
@@ -154,7 +184,9 @@ function onBatch(state: BarsState): OrderInput[] {
         max_slippage_bps: SLIPPAGE_BPS,
       }];
     }
-    if (waves === 1 && close * 1000n <= high * (1000n - WAVE2_DD)) {
+    // Second leg: after any V-trade exit (one or two buys filled), a fresh
+    // 1.8% dip with the same recovery is worth all remaining cash.
+    if (waves >= 1 && close * 1000n <= high * (1000n - LEG2_DD)) {
       return [{
         side: 'buy', symbol: SYMBOL,
         notional_quote_units: state.cash,
@@ -163,10 +195,10 @@ function onBatch(state: BarsState): OrderInput[] {
     }
   }
 
-  // Breakout rider: while at most the first wave has fired (and flat --
-  // the qty > 0 branch above returns while holding). After wave 2 the
-  // waves >= 2 guard above blocks it, so the rider can never add a third
-  // dip-chase on top of two waves.
+  // Breakout rider: while at most the first tranche has fired (and flat --
+  // the qty > 0 branch above returns while holding). After the scale-in
+  // the waves >= 2 guard blocks it, so the rider can never add a third
+  // dip-chase on top of two buys.
   if (waves <= 1 && closes.length >= 240) {
     const high240 = highest(240);
     if (
