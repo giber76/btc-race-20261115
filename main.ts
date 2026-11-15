@@ -1,3 +1,60 @@
+// v5 -- this version. Four measured changes vs v4 (kit grade-local
+// +$50.02 dev, prev +$9.84, mirror -$3.97):
+//
+// 1. NO recovery gate (RECOVERY = 0). v1-v4 required the close to be 0.2%
+//    above the trailing 60-minute low before buying. That confirmation
+//    costs 1-3 bars after the trough: tier 1 filled at 62,754 and tier 2
+//    at 62,391 on dev. Buying the dip at the trough bar's close instead
+//    fills tier 1 at 62,627 and tier 2 at 62,288, and the second leg at
+//    63,912 instead of 64,054. Worth +$3.99 on dev, +$2.93 on the
+//    previous race window, identical on the mirror. The drawdown
+//    thresholds (4.8%/5.3%) already do the falling-knife job; the hard
+//    stop (-1.5%) is the real knife protection and it stays.
+// 2. Tier 1 at 4.8% (was 4.7%), 40% of cash (was 25%). 4.8% still fires
+//    on the previous race window, whose max drawdown is 4.97% (a 5.0%
+//    tier 1 would never fire there: dev +$54.60 but prev $0.00 --
+//    rejected). 40% is insurance for a shallow race dip: if the dip
+//    stops at 5.0-5.3%, tier 2 never fires and tier 1 IS the whole
+//    position. Cost on dev is only -$0.76 (+$53.25 vs +$54.01), and it
+//    IMPROVES the other windows (prev +$14.77 vs +$12.77, mirror -$1.71
+//    vs -$3.98).
+// 3. Second leg at 2.6% (was 1.8%): the dev echo dip bottoms at exactly
+//    2.60% below the trailing high, so 2.6% fires at the trough bar's
+//    close and fills at 63,912 instead of 64,054 (+$1.78 dev, +$1.20
+//    prev vs 2.4%). Knife-edge note: a race-window echo dip of 2.4-2.5%
+//    would miss the leg entirely (losing ~$7); 2.4% was tested and is
+//    worse on both available windows, so 2.6% stays.
+// 4. Multi-leg, round five: the leaders' titles promise 4-8 round trips,
+//    so v5 re-examined v4's conclusion that decline bounces cannot be
+//    traded causally. Five NEW trigger families were tested in a
+//    bit-perfect simulator (v4 reproduced exactly): (a) buy the new
+//    60-min low, no confirmation, (b) new low + 1-bar confirmation,
+//    (c) close crossing above the 5/8-bar MA, (d) new low + deceleration
+//    filters, (e) mean reversion vs the 120-min SMA. Every family that
+//    fires is net-negative on dev (bounce PnL -$11 to -$21; best total
+//    dev +$38.35 vs v4's +$50.02) and worse on prev/mirror (best prev
+//    -$0.45, mirror -$19 to -$22). Root cause, measured: new lows
+//    cluster -- the decline grinds through 102 new 60-min lows and the
+//    trough is only the LAST one in each cluster; a causal buy at the
+//    first new low is 10-20 bars early, and the typical new low is
+//    followed by -0.27% further down and only +0.47% up within 30 bars,
+//    so with ~26 bps round-trip costs the expected value is negative at
+//    any size. The oracle (buy each trough close, sell each peak close,
+//    fill lag included) is ~$100 total, so the leader at $88.3 captures
+//    ~88% of the oracle -- that needs trough timing within 1-2 bars on
+//    6-8 bounces, which no causal signal in the data provides (trough
+//    bars look like ordinary down bars). The leader is most plausibly
+//    dev-window-specific (memorised levels or extreme overfit) and would
+//    not be expected to repeat on the unseen race window, which is what
+//    actually pays. The +$100 stretch target is not reachable with any
+//    causal trigger tried in five rounds.
+//
+// v5 numbers (kit grade-local, verified below): dev +$53.25, clean
+// single V +$53.25, previous race window +$14.77, mirrored dev window
+// -$1.71. Still below the dev top-20 line (~$59 at 17:56 WIB) and far
+// from the board leader ($88.3), but the best honest version found
+// after five rounds.
+//
 // Two-tier V-catcher with a second leg and a breakout rider for the
 // cbBTC 24-hour race.
 //
@@ -19,11 +76,12 @@
 // drawdown against its trailing high, and v2 makes $0 on it, while a
 // 4.7% entry makes +$9.84. The two tiers close both holes:
 //
-// Tier 1 -- the early tranche: when the close is at least 4.7% below the
-// trailing 360-minute high AND at least 0.2% above the trailing 60-minute
-// low, buy with 25% of cash. The drawdown half says the market fell hard;
-// the recovery half says it has stopped falling. A dip alone is not an
-// entry (falling knives), and a bounce alone is not one either.
+// Tier 1 -- the early tranche: when the close is at least 4.8% below the
+// trailing 360-minute high, buy with 40% of cash. (v5: the 0.2% recovery
+// requirement is gone -- see the v5 header. The drawdown half says the
+// market fell hard; a dip alone was never the entry, and the recovery
+// half turned out to cost more than it saved: it delayed every entry
+// 1-3 bars past the trough.)
 //
 // Tier 2 -- the deep tranche: when the close is at least 5.3% below the
 // trailing 360-minute high with the same recovery, buy with all remaining
@@ -79,31 +137,11 @@
 // close, far above the ~10-30 bps a fill normally moves, so a fast minute
 // cannot reject the entry that matters.
 //
-// Honest limits, measured with the kit's own grade-local and a
-// bit-perfect simulator on three windows: v4 gives +$50.02 on dev (v3
-// +$48.61, v2 +$52.75), clean single V +$50.02, previous race window
-// +$9.84, mirrored dev window -$3.97. v4 gives up about $2.7 of dev PnL
-// against the single-deep-entry v2 to buy insurance worth far more --
-// on a clean single V it makes +$50.02 instead of v2's +$27.95, and on
-// the previous race's window (4.97% dip) it makes +$9.84 instead of
-// v2's $0. Its worst tested window is a mirrored (inverted) dev window,
-// -$3.97, from the second leg buying a dip that never recovers. The
-// stretch target of +$100 local dev is not honestly reachable with any
-// causal trigger tried in four rounds (v1-v4): decline-phase bounces of
-// +0.8-1.8% were tested with four trigger families (level dips vs
-// 60/120/240-min highs, recovery thresholds 0.2-1.0%, MA-turn
-// confirmation, trail-only exits, sizes 25-100%, loss budgets) and every
-// variant that fires is net-negative on dev -- by the time a bounce is
-// confirmed causally, the remaining move no longer covers the ~26 bps
-// round-trip cost plus false-trigger losses. The window's up-legs sum to
-// roughly +10% gross before costs, and a causal strategy cannot capture
-// all of them -- the board leader at $88.3 is near-perfect capture of
-// every wiggle, which no causal trigger in ~700 tested configurations
-// reproduces; it is most plausibly dev-window-specific (memorised levels
-// or extreme overfit) and would not be expected to repeat on the unseen
-// race window, which is what actually pays. v4's +$50.02 with its
-// robustness profile (worst tested window -$3.97) is the best honest
-// version found.
+// Honest limits: see the v5 header at the top of this file for the
+// measured numbers (dev +$53.25, prev +$14.77, mirror -$1.71) and for
+// why the +$100 stretch target and the leaders' multi-leg numbers are
+// not honestly reachable with any causal trigger tried in five rounds.
+// v4's numbers are kept in the paragraphs above as the design history.
 //
 // Deterministic: integer arithmetic on the bars the harness sends; no
 // clock, no randomness, no network, no files. Standard library only, plus
@@ -115,11 +153,11 @@ const SYMBOL = 'CBBTC';
 
 // Entries: drawdown vs trailing 360-min high (per mille) and recovery vs
 // trailing 60-min low (per mille).
-const WAVE1_DD = 47n; // 4.7% below the 360-min high, tier 1
+const WAVE1_DD = 48n; // 4.8% below the 360-min high, tier 1 (v5: was 4.7%)
 const WAVE2_DD = 53n; // 5.3% below the 360-min high, tier 2
-const LEG2_DD = 18n; // 1.8% below the 360-min high, for the second leg
-const RECOVERY = 2n; // 0.2% above the 60-min low
-const WAVE1_SIZE_PCT = 25n; // tier 1 spends 25% of cash
+const LEG2_DD = 26n; // 2.6% below the 360-min high, for the second leg (v5: was 1.8%)
+const RECOVERY = 0n; // v5: no recovery gate -- buy the dip at the trough bar's close
+const WAVE1_SIZE_PCT = 40n; // tier 1 spends 40% of cash (v5: was 25%)
 const WAVE2_SIZE_PCT = 100n; // tier 2 spends all remaining cash
 const ADD_DROP = 5n; // scale-in fires 0.5% below the tier-2 fill price
 const RIDER_SIZE_PCT = 50n; // breakout rider spends 50% of cash
@@ -217,8 +255,8 @@ function onBatch(state: BarsState): OrderInput[] {
     const high = highest(HISTORY);
     const low = lowest(60);
     const recovered = close * 1000n >= low * (1000n + RECOVERY);
-    // Tier 2: while only tier 1 has filled, a 5.0% drawdown with recovery
-    // buys all remaining cash at the trough.
+    // Tier 2: while only tier 1 has filled, a 5.3% drawdown buys all
+    // remaining cash at the trough.
     if (deep1Done && !deep2Done && recovered && close * 1000n <= high * (1000n - WAVE2_DD)) {
       deep2Done = true;
       return [{
@@ -265,8 +303,8 @@ function onBatch(state: BarsState): OrderInput[] {
         max_slippage_bps: SLIPPAGE_BPS,
       }];
     }
-    // Second leg: after any deep trade has closed, a fresh 1.8% dip with
-    // the same recovery is worth all remaining cash.
+    // Second leg: after any deep trade has closed, a fresh 2.6% dip is
+    // worth all remaining cash.
     if (deep1Done && close * 1000n <= high * (1000n - LEG2_DD)) {
       return [{
         side: 'buy', symbol: SYMBOL,
