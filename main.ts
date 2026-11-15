@@ -20,11 +20,14 @@
 // the trailing 60-minute low, buy with all remaining cash. This is the
 // trade that catches the big recovery off a capitulation low.
 //
-// Breakout rider -- for a window that never dips: if no wave has fired and
-// the close breaks 0.3% above the trailing 240-minute high with the
-// 8-bar mean above the 21-bar mean and still rising, buy with 50% of
-// cash. This keeps the bot trading (and the guardrail met) in a rising
-// window where the dip entries would never trigger.
+// Breakout rider -- for a window that never dips: if the close breaks
+// 0.3% above the trailing 240-minute high with the 8-bar mean above the
+// 21-bar mean and still rising, buy with 50% of cash. This keeps the bot
+// trading (and the guardrail met) in a rising window where the dip entries
+// would never trigger. It also stays live after a first wave has closed:
+// a failed wave-1 probe must not leave the bot in cash for the rest of a
+// window that then trends up, so the rider may fire while at most one wave
+// has fired (never while a position is open, and never after wave 2).
 //
 // Exits (whole position, whichever comes first): +4% over the volume-weighted
 // entry price, a trailing stop 1.2% below the highest close since entry, a
@@ -160,8 +163,11 @@ function onBatch(state: BarsState): OrderInput[] {
     }
   }
 
-  // Breakout rider: only while no wave has fired yet.
-  if (waves === 0 && closes.length >= 240) {
+  // Breakout rider: while at most the first wave has fired (and flat --
+  // the qty > 0 branch above returns while holding). After wave 2 the
+  // waves >= 2 guard above blocks it, so the rider can never add a third
+  // dip-chase on top of two waves.
+  if (waves <= 1 && closes.length >= 240) {
     const high240 = highest(240);
     if (
       close * 1000n >= high240 * (1000n + RIDER_BREAKOUT) &&
